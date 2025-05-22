@@ -1,6 +1,6 @@
 # Sonido estéreo y ficheros WAVE
 
-## Nom i cognoms
+## David Bueno Cleybergh
 
 ## El formato WAVE
 
@@ -189,13 +189,120 @@ para que se realice el realce sintáctico en Python del mismo (no vale insertar 
 pantalla, debe hacerse en formato *markdown*).
 
 ##### Código de `estereo2mono()`
+```python
 
+def estereo2mono(ficEste, ficMono, canal=2):
+    """
+    Convierte un archivo estéreo WAVE de 16 bits a mono según el canal indicado.
+
+    Parametros:
+    ficEste -- ruta del archivo de entrada estéreo
+    ficMono -- ruta del archivo de salida mono
+    canal -- modo de conversión (0: izquierdo, 1: derecho, 2: semisuma, 3: semidiferencia)
+    """
+    with open(ficEste, 'rb') as f_in:
+        cab = leer_cabecera_wave(f_in)
+        if cab['num_channels'] != 2:
+            raise ValueError('El archivo no es estéreo')
+        datos = f_in.read(cab['data_size'])
+
+    tam = cab['bits_per_sample'] // 8
+    muestras = [datos[i:i+2*tam] for i in range(0, len(datos), 2*tam)]
+    datos_mono = b''.join([procesar_muestra(m, tam, canal) for m in muestras])
+
+    with open(ficMono, 'wb') as f_out:
+        escribir_cabecera_wave(f_out, 1, cab['sample_rate'], cab['bits_per_sample'], len(datos_mono))
+        f_out.write(datos_mono)
+````
 ##### Código de `mono2estereo()`
+```python
+def mono2stereo(ficIzq, ficDer, ficEste):
+    """
+    Reconstruye un archivo estéreo a partir de dos archivos mono (izquierdo y derecho).
 
+    Parametros:
+    ficIzq -- archivo mono con el canal izquierdo
+    ficDer -- archivo mono con el canal derecho
+    ficEste -- archivo de salida estéreo reconstruido
+    """
+    with open(ficIzq, 'rb') as f_izq, open(ficDer, 'rb') as f_der:
+        cab_izq = leer_cabecera_wave(f_izq)
+        cab_der = leer_cabecera_wave(f_der)
+
+        if cab_izq['num_channels'] != 1 or cab_der['num_channels'] != 1:
+            raise ValueError('Ambos ficheros deben ser monofónicos')
+        if cab_izq['sample_rate'] != cab_der['sample_rate']:
+            raise ValueError('Las frecuencias de muestreo no coinciden')
+        if cab_izq['bits_per_sample'] != cab_der['bits_per_sample']:
+            raise ValueError('Los bits por muestra no coinciden')
+        if cab_izq['data_size'] != cab_der['data_size']:
+            raise ValueError('Las longitudes de los datos no coinciden')
+
+        datos_izq = f_izq.read(cab_izq['data_size'])
+        datos_der = f_der.read(cab_der['data_size'])
+
+    tam = cab_izq['bits_per_sample'] // 8
+    datos_stereo = b''.join([datos_izq[i:i+tam] + datos_der[i:i+tam] for i in range(0, len(datos_izq), tam)])
+
+    with open(ficEste, 'wb') as f_out:
+        escribir_cabecera_wave(f_out, 2, cab_izq['sample_rate'], cab_izq['bits_per_sample'], len(datos_stereo))
+        f_out.write(datos_stereo)
+
+```
 ##### Código de `codEstereo()`
+```python
+def codEstereo(ficEste, ficCod):
+    """
+    Codifica una señal estéreo de 16 bits como una señal mono de 32 bits.
+    La semisuma se guarda en los 16 bits altos y la semidiferencia en los 16 bits bajos.
 
+    Parametros:
+    ficEste -- archivo estéreo de entrada
+    ficCod -- archivo mono de salida codificado
+    """
+    with open(ficEste, 'rb') as f_in:
+        cab = leer_cabecera_wave(f_in)
+        if cab['num_channels'] != 2 or cab['bits_per_sample'] != 16:
+            raise ValueError('El fichero debe ser estéreo de 16 bits')
+        datos = f_in.read(cab['data_size'])
+
+    muestras = [struct.unpack('<hh', datos[i:i+4]) for i in range(0, len(datos), 4)]
+    codificadas = [struct.pack('<I', (((L + R) // 2 & 0xFFFF) << 16) | ((L - R) // 2 & 0xFFFF)) for L, R in muestras]
+    datos_cod = b''.join(codificadas)
+
+    with open(ficCod, 'wb') as f_out:
+        escribir_cabecera_wave(f_out, 1, cab['sample_rate'], 32, len(datos_cod))
+        f_out.write(datos_cod)
+```
 ##### Código de `decEstereo()`
+```python
+def decEstereo(ficCod, ficEste):
+    """
+    Decodifica una señal mono de 32 bits en una señal estéreo de 16 bits por canal.
 
+    Parametros:
+    ficCod -- archivo mono de 32 bits codificado
+    ficEste -- archivo de salida estéreo reconstruido
+    """
+    with open(ficCod, 'rb') as f_in:
+        cab = leer_cabecera_wave(f_in)
+        if cab['num_channels'] != 1 or cab['bits_per_sample'] != 32:
+            raise ValueError('El fichero debe ser monofónico de 32 bits')
+        datos = f_in.read(cab['data_size'])
+
+    muestras = [struct.unpack('<I', datos[i:i+4])[0] for i in range(0, len(datos), 4)]
+    reconstruidas = [
+        struct.pack('<hh',
+            saturar16((m >> 16) + int16(m & 0xFFFF)),
+            saturar16((m >> 16) - int16(m & 0xFFFF))
+        ) for m in muestras
+    ]
+    datos_estereo = b''.join(reconstruidas)
+
+    with open(ficEste, 'wb') as f_out:
+        escribir_cabecera_wave(f_out, 2, cab['sample_rate'], 16, len(datos_estereo))
+        f_out.write(datos_estereo)
+```
 #### Subida del resultado al repositorio GitHub y *pull-request*
 
 La entrega se formalizará mediante *pull request* al repositorio de la tarea.
